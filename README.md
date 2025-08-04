@@ -254,7 +254,6 @@ Feel free to fork this repository, experiment, and submit pull requests with imp
 License
 This project is open-source and available under the MIT License.
 
-This GitHub project structure provides a clear, actionable path. You'll be running a real FHIR server, generating real (synthetic) data, and writing code to manipulate it, giving you concrete experience.
 
 
 
