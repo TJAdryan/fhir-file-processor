@@ -10,7 +10,7 @@ hapi-fhir-server/.idea/ # If using IntelliJ
 hapi-fhir-server/.vscode/ # If using VS Code
 
 # Synthea output (can be large)
-data_generation/output/
+data-generation/output/
 
 # IDE specific files
 .vscode/
