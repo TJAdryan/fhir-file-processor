@@ -7,7 +7,7 @@ from fhir_client import FHIRClient
 def upload_fhir_data(client: FHIRClient, data_dir: str, resource_type: str):
     """
     Reads FHIR JSON files from a directory and uploads them to the server.
-    This version handles FHIR Bundles by sending them as a single transaction.
+    This final version handles Bundles by uploading each resource individually.
     """
     resource_count = 0
     directory_to_scan = os.path.join(data_dir, resource_type)
@@ -24,24 +24,27 @@ def upload_fhir_data(client: FHIRClient, data_dir: str, resource_type: str):
                 with open(file_path, 'r') as f:
                     resource_data = json.load(f)
 
-                # If the resource is a Bundle, upload it as a single transaction
+                # If the file is a Bundle, iterate through it and upload each entry
                 if resource_data.get('resourceType') == "Bundle":
-                    logging.info(f"  -> Found Bundle in {filename}. Uploading as a single transaction...")
-                    # For a transaction Bundle, POST to the base URL
-                    response = client._make_request('POST', "", data=resource_data)
-                    if response:
-                        resource_count += len(resource_data.get('entry', []))
-                        logging.info(f"    -> Successfully uploaded Bundle. Total resources in bundle: {len(resource_data.get('entry', []))}")
-                    else:
-                        logging.error(f"    -> Failed to upload Bundle from {filename}.")
-                # Otherwise, try to upload the individual resource
+                    logging.info(f"  -> Found Bundle in {filename}. Uploading individual entries...")
+                    for entry in resource_data.get('entry', []):
+                        resource = entry.get('resource')
+                        if resource:
+                            entry_resource_type = resource.get('resourceType')
+                            # Check if the resource type matches our expectation
+                            if entry_resource_type == resource_type:
+                                response = client.create_resource(entry_resource_type, resource)
+                                if response:
+                                    resource_count += 1
+                                    logging.info(f"    -> Uploaded {entry_resource_type} with ID {response.get('id')}")
+                            else:
+                                logging.warning(f"    -> Skipping resource in Bundle: '{entry_resource_type}' does not match expected '{resource_type}'.")
+                # Otherwise, assume it's a single resource and upload it
                 elif resource_data.get('resourceType') == resource_type:
                     response = client.create_resource(resource_type, resource_data)
                     if response:
                         resource_count += 1
-                        logging.info(f"  -> Uploaded {resource_type} with ID {response.get('id')}")
-                    else:
-                        logging.error(f"  -> Failed to upload {resource_type} from {filename}.")
+                        logging.info(f"  -> Uploaded {resource_type} from {filename} with ID {response.get('id')}")
                 else:
                     logging.warning(f"  -> Skipping {filename}: resourceType '{resource_data.get('resourceType')}' does not match expected '{resource_type}'.")
 
