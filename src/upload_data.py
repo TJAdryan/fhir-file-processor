@@ -2,64 +2,74 @@ import os
 import json
 import argparse
 import logging
-from fhir_client import FHIRClient
+import requests
 
-def upload_fhir_data(client: FHIRClient, data_dir: str, resource_type: str):
-    """
-    Reads FHIR JSON files from a directory and uploads them to the server.
-    This final version handles Bundles by uploading each resource individually.
-    """
-    resource_count = 0
-    directory_to_scan = os.path.join(data_dir, resource_type)
+# A simple FHIR Client class to handle the API calls
+class FHIRClient:
+    def __init__(self, base_url: str):
+        self.base_url = base_url
+        logging.info(f"FHIR Client initialized with base URL: {self.base_url}")
 
-    if not os.path.isdir(directory_to_scan):
-        logging.error(f"Error: Directory '{directory_to_scan}' not found.")
+    def upload_bundle(self, bundle: dict):
+        """
+        Uploads a FHIR transaction bundle to the server's base URL.
+        """
+        headers = {
+            "Content-Type": "application/fhir+json"
+        }
+        try:
+            response = requests.post(self.base_url, json=bundle, headers=headers)
+            response.raise_for_status()  # Raise an exception for bad status codes (4xx or 5xx)
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            logging.error(f"Request failed: {e}")
+            return None
+
+def upload_synthea_bundles(client: FHIRClient, data_dir: str):
+    """
+    Reads Synthea-generated FHIR transaction Bundles from a directory and uploads them.
+    """
+    bundle_count = 0
+    success_count = 0
+
+    if not os.path.isdir(data_dir):
+        logging.error(f"Directory not found: {data_dir}")
         return
 
-    logging.info(f"Uploading files from directory: {directory_to_scan}")
-    for filename in os.listdir(directory_to_scan):
+    logging.info(f"Scanning directory for Synthea Bundles: {data_dir}")
+    for filename in os.listdir(data_dir):
         if filename.endswith(".json"):
-            file_path = os.path.join(directory_to_scan, filename)
+            file_path = os.path.join(data_dir, filename)
+            bundle_count += 1
+            logging.info(f"  -> Processing file: {filename}")
             try:
                 with open(file_path, 'r') as f:
-                    resource_data = json.load(f)
+                    bundle_data = json.load(f)
 
-                # If the file is a Bundle, iterate through it and upload each entry
-                if resource_data.get('resourceType') == "Bundle":
-                    logging.info(f"  -> Found Bundle in {filename}. Uploading individual entries...")
-                    for entry in resource_data.get('entry', []):
-                        resource = entry.get('resource')
-                        if resource:
-                            entry_resource_type = resource.get('resourceType')
-                            # Check if the resource type matches our expectation
-                            if entry_resource_type == resource_type:
-                                response = client.create_resource(entry_resource_type, resource)
-                                if response:
-                                    resource_count += 1
-                                    logging.info(f"    -> Uploaded {entry_resource_type} with ID {response.get('id')}")
-                            else:
-                                logging.warning(f"    -> Skipping resource in Bundle: '{entry_resource_type}' does not match expected '{resource_type}'.")
-                # Otherwise, assume it's a single resource and upload it
-                elif resource_data.get('resourceType') == resource_type:
-                    response = client.create_resource(resource_type, resource_data)
+                # Validate that it's a transaction bundle from Synthea
+                if bundle_data.get('resourceType') == "Bundle" and bundle_data.get('type') == "transaction":
+                    response = client.upload_bundle(bundle_data)
                     if response:
-                        resource_count += 1
-                        logging.info(f"  -> Uploaded {resource_type} from {filename} with ID {response.get('id')}")
+                        success_count += 1
+                        logging.info(f"    -> Successfully uploaded Bundle {filename}")
+                    else:
+                        logging.error(f"    -> Failed to upload Bundle {filename}")
                 else:
-                    logging.warning(f"  -> Skipping {filename}: resourceType '{resource_data.get('resourceType')}' does not match expected '{resource_type}'.")
+                    logging.warning(f"  -> Skipping file {filename}: Not a valid FHIR transaction Bundle.")
 
             except Exception as e:
                 logging.error(f"Error processing file {filename}: {e}")
 
-    logging.info(f"Finished uploading. Total resources handled: {resource_count}")
+    logging.info(f"Finished uploading. {success_count}/{bundle_count} bundles uploaded successfully.")
 
 if __name__ == "__main__":
-    fhir_client = FHIRClient('http://localhost:8080/fhir')
-
-    parser = argparse.ArgumentParser(description="Upload FHIR JSON files to a server.")
-    parser.add_argument("--data-dir", required=True, help="Path to the parent directory containing FHIR resource subdirectories (e.g., 'data-generation/output/fhir').")
-    parser.add_argument("--resource-type", required=True, help="The type of resource to upload (e.g., 'Patient').")
-
+    parser = argparse.ArgumentParser(description="Upload Synthea FHIR transaction Bundles to a server.")
+    parser.add_argument("--data-dir", required=True, help="Path to the directory containing the Synthea FHIR JSON files (e.g., 'data-generation/output/fhir').")
+    
     args = parser.parse_args()
 
-    upload_fhir_data(fhir_client, args.data_dir, args.resource_type)
+    # The HAPI server base URL is typically just the server base
+    fhir_client = FHIRClient('http://localhost:8080/fhir')
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+    upload_synthea_bundles(fhir_client, args.data_dir)
